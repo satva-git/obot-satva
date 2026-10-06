@@ -731,3 +731,38 @@ func newSkillRule(name string, subjects []types.Subject, resources []types.Skill
 		},
 	}
 }
+
+// A shared skill library can hold hundreds of skills; the user Skills page sends no limit, so the
+// default must cover the whole library or everything after the first page of names is unreachable.
+func TestSkillHandlerListDefaultLimitCoversLargeLibrary(t *testing.T) {
+	const total = 260
+	objects := make([]kclient.Object, 0, total)
+	for i := 0; i < total; i++ {
+		name := "skill-" + strconv.Itoa(1000+i)
+		objects = append(objects, &v1.Skill{
+			ObjectMeta: metav1.ObjectMeta{Name: "sk-" + name, Namespace: system.DefaultNamespace},
+			Spec: v1.SkillSpec{
+				SkillManifest: types.SkillManifest{Name: name},
+				RepoID:        "repo-1",
+			},
+			Status: v1.SkillStatus{Valid: true},
+		})
+	}
+	storage := newFakeStorage(t, objects...)
+	handler := NewSkillHandler(newSkillAccessRuleHelper(t,
+		newSkillRule("rule-all", []types.Subject{{Type: types.SubjectTypeUser, ID: "user1"}}, []types.SkillResource{{Type: types.SkillResourceTypeSkillRepository, ID: "repo-1"}}),
+	))
+
+	rec := httptest.NewRecorder()
+	err := handler.List(api.Context{
+		ResponseWriter: rec,
+		Request:        httptest.NewRequest(http.MethodGet, "/api/skills", nil), // no limit, like the user page
+		Storage:        storage,
+		User:           testUser("user1"),
+	})
+	require.NoError(t, err)
+
+	var list types.SkillList
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	assert.Len(t, list.Items, total)
+}
