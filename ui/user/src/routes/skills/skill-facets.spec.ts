@@ -77,3 +77,20 @@ describe('toSkillRows', () => {
 		});
 	});
 });
+
+describe('future folders', () => {
+	it('turns folders nobody has created yet into department and group values', () => {
+		const rows = toSkillRows([
+			{ id: '1', type: 'skill', relativePath: 'skills/hr/recruiting/screen-candidates' },
+			{ id: '2', type: 'skill', relativePath: 'skills/finops/cloud-cost/rightsizing' },
+			{ id: '3', type: 'skill', relativePath: 'skills/hr/recruiting/senior/interview-loop' }
+		]);
+		expect(rows.map((r) => [r.department, r.group])).toEqual([
+			['HR', 'Recruiting'],
+			['Finops', 'Cloud Cost'],
+			['HR', 'Recruiting / Senior']
+		]);
+		// the table builds its filter options from these values, so the two departments appear without any code change
+		expect(new Set(rows.map((r) => r.department))).toEqual(new Set(['HR', 'Finops']));
+	});
+});
