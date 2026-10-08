@@ -16,7 +16,13 @@
 		MCP_CONNECTION_INVALID_LICENSE_MESSAGE
 	} from '$lib/services/user/constants';
 	import { formatTimeAgo } from '$lib/time';
-	import { setUrlParamAndUpdateUrl } from '$lib/url.js';
+	import {
+		clearUrlParams,
+		getTableUrlParamsFilters,
+		setFilterUrlParams,
+		setUrlParamAndUpdateUrl
+	} from '$lib/url.js';
+	import { toSkillRows } from './skill-facets';
 	import { TriangleAlert, PencilRuler, Bot, Download } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { twMerge } from 'tailwind-merge';
@@ -25,6 +31,9 @@
 	let query = $derived(page.url.searchParams.get('query') ?? '');
 
 	let skills = $state<Skill[]>(untrack(() => data?.skills ?? []));
+	// Each skill also carries a department and group (from its folder path) so a large library can be narrowed down.
+	let skillRows = $derived(toSkillRows(skills));
+	let urlFilters = $derived(getTableUrlParamsFilters());
 
 	let copyFields = $state<ReturnType<typeof CopyField>[]>([]);
 	let installSkillDialog = $state<ReturnType<typeof ResponsiveDialog> | undefined>(undefined);
@@ -76,13 +85,15 @@
 
 	let skillsTableData = $derived(
 		query
-			? skills.filter(
+			? skillRows.filter(
 					(d) =>
 						d.displayName?.toLowerCase().includes(query.toLowerCase()) ||
 						d.name?.toLowerCase().includes(query.toLowerCase()) ||
-						d.description?.toLowerCase().includes(query.toLowerCase())
+						d.description?.toLowerCase().includes(query.toLowerCase()) ||
+						d.department.toLowerCase().includes(query.toLowerCase()) ||
+						d.group.toLowerCase().includes(query.toLowerCase())
 				)
-			: skills
+			: skillRows
 	);
 
 	function updateSearchQuery(value: string) {
@@ -113,7 +124,7 @@
 						class="dark:bg-base-200 dark:border-base-400 bg-base-100 border border-transparent shadow-sm"
 						value={query}
 						onChange={updateSearchQuery}
-						placeholder="Search skills..."
+						placeholder={`Search ${skills.length} skills...`}
 					/>
 				</div>
 			</div>
@@ -138,18 +149,24 @@
 		{:else if skills.length > 0}
 			<Table
 				data={skillsTableData}
-				fields={['displayName', 'description', 'created']}
+				fields={['displayName', 'department', 'group', 'description', 'created']}
 				noDataMessage="No skills found."
 				classes={{
 					root: 'rounded-none rounded-b-md shadow-none'
 				}}
-				columnMaxWidths={{ created: 240 }}
-				sortable={['displayName', 'created']}
+				columnMaxWidths={{ created: 240, department: 160, group: 200 }}
+				sortable={['displayName', 'department', 'group', 'created']}
+				filterable={['department', 'group']}
+				filters={urlFilters}
+				onFilter={setFilterUrlParams}
+				onClearAllFilters={() => clearUrlParams(['department', 'group'])}
 				headers={[
 					{
 						title: 'Name',
 						property: 'displayName'
-					}
+					},
+					{ title: 'Department', property: 'department' },
+					{ title: 'Group', property: 'group' }
 				]}
 				setRowClasses={(d) => {
 					if (d.validationError) {
