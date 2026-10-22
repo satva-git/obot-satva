@@ -12,7 +12,8 @@ IMAGE=${IMAGE:-ghcr.io/satva-git/obot-satva}
 BACKUP_CMD="pg_dump -U obot -f /data/obot-pre-deploy.sql obot"
 : "${COOLIFY_TOKEN:?}" "${TAG:?}"
 
-api() { curl -sSf -m 30 -H "Authorization: Bearer $COOLIFY_TOKEN" -H 'Content-Type: application/json' "$@"; }
+# Coolify answers slowly or empty while it deploys: retry every call (all are safe to repeat except /deploy).
+api() { curl -sSf -m 60 --retry 4 --retry-delay 10 --retry-all-errors -H "Authorization: Bearer $COOLIFY_TOKEN" -H 'Content-Type: application/json' "$@"; }
 jget() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 health() { [ "$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$SITE/api/healthz")" = 200 ]; }
 set_image() {
@@ -22,11 +23,11 @@ set_image() {
 }
 deploy() {
   local d s=unknown
-  d=$(api "$API/deploy?uuid=$APP&force=false" | jget '["deployments"][0]["deployment_uuid"]')
+  d=$(api --retry 0 "$API/deploy?uuid=$APP&force=false" | jget '["deployments"][0]["deployment_uuid"]')
   echo "coolify deployment $d"
   for _ in $(seq 90); do
     sleep 10
-    s=$(api "$API/deployments/$d" | jget '.get("status")')
+    s=$(api "$API/deployments/$d" | jget '.get("status")' 2>/dev/null) || s=no-answer
     echo "  $s"
     case $s in finished | failed | cancelled*) break ;; esac
   done
