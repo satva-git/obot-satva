@@ -1,15 +1,15 @@
 # Satva Obot: how changes reach obot.satva.xyz
 
-`satva/main` = an upstream Obot release tag + Satva's patches. Live (Coolify app `obot`) runs
-`ghcr.io/satva-git/obot-satva:sha-<commit>`. Data lives on the Coolify volume `/data`, never in the image.
+`satva/main` = an upstream Obot release tag + Satva's patches. The Coolify app `obot` builds this
+branch itself (build pack Dockerfile, public repo `satva-git/obot-satva`, no registry login).
+Data lives on the Coolify volume `/data`, never in the image.
 
 | I want to | Do this |
 |---|---|
-| Ship a change | PR into `satva/main`, merge. Actions tests + builds, then waits for **Approve** under Actions → the run → Review deployments. Deploy backs up the DB (`/data/obot-pre-deploy.sql`), swaps the image, health-checks, rolls back by itself on failure. |
-| Roll back | Actions → satva → Run workflow on `satva/main` with `tag` = an earlier `sha-…` (see Packages → obot-satva). |
-| Upgrade Obot | `bash .github/satva/upgrade.sh v0.25.6` in the local clone, wait for CI on `satva/upgrade-v0.25.6`, then run the push command it prints. Read the release notes first: a minor-version jump migrates the DB one way. |
+| Ship a change | PR into `satva/main`, wait for the green `satva` test check, merge. Then Coolify → obot → **Deploy**. The pre-deployment command backs up the DB to `/data/obot-pre-deploy.sql`; the old container keeps serving until the new build starts. Build takes 10–20 min on the server. |
+| Roll back | Revert the commit on `satva/main`, then Deploy. Fastest emergency: Coolify → obot → Deployments → redeploy an earlier finished deployment. |
+| Upgrade Obot | `bash .github/satva/upgrade.sh v0.25.6` in the local clone, wait for CI on `satva/upgrade-v0.25.6`, open the PR it prints. Also bump the provider tags at the top of `Dockerfile`. Read the release notes first: a minor-version jump migrates the DB one way. |
 | Restore the DB | Coolify → obot → Terminal: `psql -U obot -d obot -f /data/obot-pre-deploy.sql` (into an empty DB) or the nightly file under `/data/backups/`. |
 
-One-time setup (already done once; repeat only on a new server): `docker login ghcr.io` on the Coolify
-server with a `read:packages` token; secret `COOLIFY_TOKEN` in the `production` environment;
-nightly backup as a Coolify Scheduled Task on the obot app.
+Old settings (Docker Image `ghcr.io/obot-platform/obot:v0.25.1`) are saved outside the repo; to go back,
+set Build Pack = Docker Image with that image in Coolify and Deploy.

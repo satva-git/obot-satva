@@ -1,6 +1,7 @@
-ARG PROVIDERS_IMAGE=ghcr.io/obot-platform/providers:latest
-ARG ENTERPRISE_PROVIDERS_IMAGE=ghcr.io/obot-platform/enterprise-providers:latest
-ARG ENCRYPTION_BINS_IMAGE=ghcr.io/obot-platform/providers/encryption-bins:latest
+# Satva: Coolify builds this file on the server; providers pinned to the release we patch.
+ARG PROVIDERS_IMAGE=ghcr.io/obot-platform/providers:v0.25.1
+ARG ENTERPRISE_PROVIDERS_IMAGE=ghcr.io/obot-platform/enterprise-providers:v0.25.1
+ARG ENCRYPTION_BINS_IMAGE=ghcr.io/obot-platform/providers/encryption-bins:v0.25.1
 ARG BASE_IMAGE=cgr.dev/chainguard/wolfi-base
 
 FROM ${BASE_IMAGE} AS base
