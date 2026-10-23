@@ -441,6 +441,10 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 	mux.HandleFunc("GET /api/skills/{id}", skills.Get)
 	mux.HandleFunc("GET /api/skills/{id}/download", skills.Download)
 	mux.HandleFunc("GET /api/skills/{id}/preview", skills.Preview)
+	mux.HandleFunc("POST /api/skills/{id}/install-token", skills.InstallToken)
+	// Public: the random token from install-token is the credential.
+	mux.HandleFunc("GET /api/skill-install/{token}/zip", skills.InstallZip)
+	mux.HandleFunc("GET /api/skill-install/{token}/{os}", skills.InstallScript)
 
 	// Skill repositories (admin only)
 	mux.HandleFunc("GET /api/skill-repositories", skillRepositories.List)

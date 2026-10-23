@@ -1293,6 +1293,17 @@ export async function getLicense(opts?: { fetch?: Fetcher }): Promise<License> {
 
 // Skills
 
+// A short-lived token for the one-command install (curl | sh, irm | iex), which needs no login.
+export async function createSkillInstallToken(
+	id: string,
+	opts?: { dontLogErrors?: boolean }
+): Promise<{ token: string; expiresAt: string }> {
+	return (await doPost(`/skills/${encodeURIComponent(id)}/install-token`, {}, opts)) as {
+		token: string;
+		expiresAt: string;
+	};
+}
+
 export async function downloadSkill(
 	id: string,
 	opts?: { fetch?: Fetcher; dontLogErrors?: boolean }

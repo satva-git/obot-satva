@@ -133,6 +133,7 @@ var apiResources = map[string][]string{
 		"GET /api/skills/{skill_id}",
 		"GET /api/skills/{skill_id}/download",
 		"GET /api/skills/{skill_id}/preview",
+		"POST /api/skills/{skill_id}/install-token",
 	},
 	types.GroupPublishedArtifacts: {
 		"GET    /api/published-artifacts/{artifact_id}",

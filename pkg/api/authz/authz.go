@@ -231,6 +231,11 @@ var (
 
 			"GET /api/healthz",
 
+			// One-command skill install from a terminal with no login.
+			// The handler only serves a valid, short-lived token from POST /api/skills/{id}/install-token.
+			// Covers both /{token}/zip and /{token}/{windows|unix}.
+			"GET /api/skill-install/{token}/{os}",
+
 			"GET /api/app-preferences",
 
 			"GET /api/auth-providers",

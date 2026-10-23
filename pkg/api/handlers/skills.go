@@ -37,12 +37,14 @@ const (
 type SkillHandler struct {
 	skillAccessRuleHelper  *skillaccessrule.Helper
 	materializeSkillSource func(ctx context.Context, skill *v1.Skill, token string) (func(), string, error)
+	installTokens          *installTokenStore
 }
 
 func NewSkillHandler(skillAccessRuleHelper *skillaccessrule.Helper) *SkillHandler {
 	return &SkillHandler{
 		skillAccessRuleHelper:  skillAccessRuleHelper,
 		materializeSkillSource: skillrepository.MaterializeSkillSource,
+		installTokens:          newInstallTokenStore(skillInstallTokenTTL),
 	}
 }
 
@@ -171,7 +173,11 @@ func (h *SkillHandler) Download(req api.Context) error {
 	if err != nil {
 		return err
 	}
+	return h.writeSkillZip(req, skill)
+}
 
+// writeSkillZip streams the skill as a ZIP whose entries sit at the root (SKILL.md, scripts/...), no top-level folder.
+func (h *SkillHandler) writeSkillZip(req api.Context, skill *v1.Skill) error {
 	cleanup, skillDir, err := h.materialize(req, skill)
 	if err != nil {
 		return fmt.Errorf("failed to materialize skill source: %w", err)

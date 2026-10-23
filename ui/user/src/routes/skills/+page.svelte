@@ -106,6 +106,26 @@
 
 	let selectedTab = $state<'macos/linux' | 'windows'>('windows');
 
+	// One-command install: a short-lived token lets curl/irm fetch the private skill with no login.
+	let installToken = $state<string | undefined>(undefined);
+	let installTokenError = $state('');
+
+	async function loadInstallToken() {
+		const skill = selectedSkillToInstall;
+		installToken = undefined;
+		installTokenError = '';
+		if (!skill) return;
+		try {
+			const { token } = await UserService.createSkillInstallToken(skill.id);
+			if (selectedSkillToInstall?.id === skill.id) installToken = token;
+		} catch (err) {
+			console.error('Failed to create skill install token', err);
+			if (selectedSkillToInstall?.id === skill.id) {
+				installTokenError = 'Could not create the install command. Use the steps by hand below.';
+			}
+		}
+	}
+
 	let clientUnzipCommands = $derived.by(() => {
 		const skillName = sanitizeFilenameSegment(
 			selectedSkillToInstall?.name ?? selectedSkillToInstall?.id ?? 'skill'
@@ -120,9 +140,13 @@
 			return `unzip "$HOME/Downloads/${skillName}.zip" -d "$HOME/${clientSkillsDirectory}/${skillName}"`;
 		};
 
-		// One command that downloads and installs (Obot CLI); `~/` works on Windows too.
-		const cliCommand = (clientSkillsDirectory: string) =>
-			`obot skills install ${selectedSkillToInstall?.id ?? ''} --destination ~/${clientSkillsDirectory}`;
+		// One command that downloads and installs; needs nothing but the built-in terminal.
+		const oneCommand = (clientSkillsDirectory: string) => {
+			const url = `${page.url.origin}/api/skill-install/${installToken ?? ''}`;
+			return selectedTab === 'windows'
+				? `irm "${url}/windows?dir=${clientSkillsDirectory}" | iex`
+				: `curl -fsSL "${url}/unix?dir=${clientSkillsDirectory}" | sh`;
+		};
 
 		return [
 			{
@@ -131,7 +155,7 @@
 				icon: COMMON_AI_CLIENTS_MAP.get(AiClient.Cursor)?.icon,
 				iconDark: COMMON_AI_CLIENTS_MAP.get(AiClient.Cursor)?.iconDark,
 				command: command('.cursor/skills'),
-				cliCommand: cliCommand('.cursor/skills')
+				oneCommand: oneCommand('.cursor/skills')
 			},
 			{
 				id: 'claudeCode',
@@ -139,7 +163,7 @@
 				icon: COMMON_AI_CLIENTS_MAP.get(AiClient.Claude)?.icon,
 				iconDark: COMMON_AI_CLIENTS_MAP.get(AiClient.Claude)?.iconDark,
 				command: command('.claude/skills'),
-				cliCommand: cliCommand('.claude/skills')
+				oneCommand: oneCommand('.claude/skills')
 			},
 			{
 				id: 'codex',
@@ -147,13 +171,13 @@
 				icon: COMMON_AI_CLIENTS_MAP.get(AiClient.Codex)?.icon,
 				iconDark: COMMON_AI_CLIENTS_MAP.get(AiClient.Codex)?.iconDark,
 				command: command('.codex/skills'),
-				cliCommand: cliCommand('.codex/skills')
+				oneCommand: oneCommand('.codex/skills')
 			},
 			{
 				id: 'other',
 				label: 'Other',
 				command: command('.agents/skills'),
-				cliCommand: cliCommand('.agents/skills')
+				oneCommand: oneCommand('.agents/skills')
 			}
 		];
 	});
@@ -401,40 +425,12 @@
 
 <ResponsiveDialog
 	bind:this={installSkillDialog}
+	onOpen={loadInstallToken}
 	animate="slide"
 	id="install-skill-dialog"
 	title={selectedSkillToInstall?.displayName}
 >
 	<div class="w-full @container md:px-0 px-4">
-		<div class="divider md:mt-0">Quick install (one command)</div>
-		<p class="text-muted-content mb-2 text-xs">
-			Needs the Obot CLI. <a class="link" href={resolve('/install-cli')}>Get the Obot CLI</a>
-		</p>
-		<div class="flex flex-col gap-2">
-			{#each clientUnzipCommands as client (client.id)}
-				<CopyField
-					value={client.cliCommand}
-					id={`cli-command-${client.id}`}
-					classes={{ inputLabel: 'bg-base-100 dark:bg-base-300', input: 'font-mono' }}
-				>
-					{#snippet preContent()}
-						<span class="label shrink-0 w-38 mr-0 text-base-content">{client.label}</span>
-					{/snippet}
-				</CopyField>
-			{/each}
-		</div>
-		<div id="download-skill-container">
-			<div class="divider">Or by hand: 1. Download {selectedSkillToInstall?.displayName}</div>
-			<div class="md:p-0 md:pb-0 p-4">
-				<button
-					class="btn btn-primary btn-sm w-full"
-					onclick={() => handleDownloadSkill(selectedSkillToInstall)}
-				>
-					<Download class="size-4" /> Download
-				</button>
-			</div>
-		</div>
-		<div class="divider">2. Unzip via CLI</div>
 		<div class="relative">
 			<p class="absolute top-1/2 -translate-y-1/2 left-2 text-xs font-semibold">Choose your OS:</p>
 			<div
@@ -458,6 +454,39 @@
 				</button>
 			</div>
 		</div>
+		<div class="divider">Install with one command (paste into your terminal)</div>
+		{#if installTokenError}
+			<p class="text-error mb-2 text-sm">{installTokenError}</p>
+		{:else if !installToken}
+			<Loading />
+		{:else}
+			<p class="text-muted-content mb-2 text-xs">Link works for 15 minutes.</p>
+			<div class="flex flex-col gap-2">
+				{#each clientUnzipCommands as client (client.id)}
+					<CopyField
+						value={client.oneCommand}
+						id={`one-command-${client.id}`}
+						classes={{ inputLabel: 'bg-base-100 dark:bg-base-300', input: 'font-mono' }}
+					>
+						{#snippet preContent()}
+							<span class="label shrink-0 w-38 mr-0 text-base-content">{client.label}</span>
+						{/snippet}
+					</CopyField>
+				{/each}
+			</div>
+		{/if}
+		<div id="download-skill-container">
+			<div class="divider">Or by hand: 1. Download {selectedSkillToInstall?.displayName}</div>
+			<div class="md:p-0 md:pb-0 p-4">
+				<button
+					class="btn btn-primary btn-sm w-full"
+					onclick={() => handleDownloadSkill(selectedSkillToInstall)}
+				>
+					<Download class="size-4" /> Download
+				</button>
+			</div>
+		</div>
+		<div class="divider">2. Unzip via CLI</div>
 		<div id="unzip-skill-commands-container" class="flex gap-2 flex-col">
 			{#each clientUnzipCommands as client, index (client.id)}
 				<div id={`unzip-skill-command-${client.id}-container`}>

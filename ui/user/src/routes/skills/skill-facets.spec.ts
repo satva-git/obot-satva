@@ -149,4 +149,23 @@ describe('folder browser', () => {
 		expect(names('Accounting/Tax', false)).toEqual(['skills/accounting/tax/sales-tax']);
 		expect(names('Account', true)).toEqual([]);
 	});
+
+	it('files agent and guardrail wrappers under Agents and Guardrails', () => {
+		const wrappers = toSkillRows(
+			[
+				'skills/agents/accounting/xero-specialist-agent',
+				'skills/guardrails/core/org-guardrails',
+				'skills/guardrails/platform/git-guardrails',
+				'skills/guardrails/stacks/dotnet-guardrails'
+			].map((relativePath, i) => ({ id: `w${i}`, relativePath }) as never)
+		);
+		expect(wrappers.map((r) => r.folder)).toEqual([
+			['Agents', 'Accounting'],
+			['Guardrails', 'Core'],
+			['Guardrails', 'Platform'],
+			['Guardrails', 'Stacks']
+		]);
+		const tree = buildFolderTree(wrappers);
+		expect(tree.children.map((c) => `${c.name}:${c.count}`)).toEqual(['Agents:1', 'Guardrails:3']);
+	});
 });

@@ -88,6 +88,40 @@ func TestSkillRouteAuthorization(t *testing.T) {
 			allowed: true,
 		},
 		{
+			name:   "skills-scoped user can create skill install token",
+			method: http.MethodPost,
+			path:   "/api/skills/some-skill-id/install-token",
+			user: &user.DefaultInfo{
+				Name:   "key-user",
+				Groups: []string{types.GroupSkills, types.GroupAuthenticated},
+			},
+			allowed: true,
+		},
+		{
+			name:   "basic-only user cannot create skill install token",
+			method: http.MethodPost,
+			path:   "/api/skills/some-skill-id/install-token",
+			user: &user.DefaultInfo{
+				Name:   "user",
+				Groups: []string{types.GroupBasic, types.GroupAuthenticated},
+			},
+			allowed: false,
+		},
+		{
+			name:    "unauthenticated user can fetch skill install script",
+			method:  http.MethodGet,
+			path:    "/api/skill-install/some-token/windows",
+			user:    &user.DefaultInfo{Name: "anonymous", Groups: []string{UnauthenticatedGroup}},
+			allowed: true,
+		},
+		{
+			name:    "unauthenticated user can fetch skill install zip",
+			method:  http.MethodGet,
+			path:    "/api/skill-install/some-token/zip",
+			user:    &user.DefaultInfo{Name: "anonymous", Groups: []string{UnauthenticatedGroup}},
+			allowed: true,
+		},
+		{
 			name:   "skills-scoped user can preview skill",
 			method: http.MethodGet,
 			path:   "/api/skills/some-skill-id/preview",
