@@ -30,8 +30,8 @@ import (
 
 const (
 	// The user Skills page sends no limit and has no pagination, so the default must cover a whole shared library.
-	defaultSkillListLimit = 1000
-	maxSkillListLimit     = 1000
+	defaultSkillListLimit = 5000
+	maxSkillListLimit     = 5000
 )
 
 type SkillHandler struct {

@@ -3,7 +3,7 @@ import { NanobotService } from '$lib/services';
 import type { Skill } from '$lib/services/nanobot/types';
 import type { PageLoad } from './$types';
 
-const SKILL_LIST_LIMIT = 1000; // the server clamps this to its own maximum
+const SKILL_LIST_LIMIT = 5000; // the server clamps this to its own maximum
 
 export const load: PageLoad = async ({ fetch, parent }) => {
 	const { profile } = await parent();

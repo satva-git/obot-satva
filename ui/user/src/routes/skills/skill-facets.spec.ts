@@ -1,4 +1,11 @@
-import { labelFromSlug, skillFacets, toSkillRows } from './skill-facets';
+import {
+	buildFolderTree,
+	findFolder,
+	inFolder,
+	labelFromSlug,
+	skillFacets,
+	toSkillRows
+} from './skill-facets';
 import { describe, expect, it } from 'vitest';
 
 describe('labelFromSlug', () => {
@@ -92,5 +99,54 @@ describe('future folders', () => {
 		]);
 		// the table builds its filter options from these values, so the two departments appear without any code change
 		expect(new Set(rows.map((r) => r.department))).toEqual(new Set(['HR', 'Finops']));
+	});
+});
+
+describe('folder browser', () => {
+	const rows = toSkillRows(
+		[
+			'skills/accounting/tax/sales-tax',
+			'skills/accounting/platforms/xero/xero-close',
+			'skills/accounting/platforms/qbo/qbo-close',
+			'skills/seo/ai-search/visibility',
+			'loose-skill'
+		].map((relativePath, i) => ({ id: `s${i}`, relativePath }) as never)
+	);
+
+	it('places each skill in its folder, without a fake General folder', () => {
+		expect(rows.map((r) => r.folder)).toEqual([
+			['Accounting', 'Tax'],
+			['Accounting', 'Platforms', 'Xero'],
+			['Accounting', 'Platforms', 'Qbo'],
+			['SEO', 'AI Search'],
+			['Other']
+		]);
+	});
+
+	it('builds a sorted tree whose counts include subfolders', () => {
+		const tree = buildFolderTree(rows);
+		expect(tree.count).toBe(5);
+		expect(tree.children.map((c) => `${c.name}:${c.count}`)).toEqual([
+			'Accounting:3',
+			'Other:1',
+			'SEO:1'
+		]);
+		const platforms = findFolder(tree, 'Accounting/Platforms');
+		expect(platforms?.count).toBe(2);
+		expect(platforms?.children.map((c) => c.path)).toEqual([
+			'Accounting/Platforms/Qbo',
+			'Accounting/Platforms/Xero'
+		]);
+		expect(findFolder(tree, 'Nope/Missing')).toBeUndefined();
+	});
+
+	it('filters by folder, with or without subfolders', () => {
+		const names = (path: string, deep: boolean) =>
+			rows.filter((r) => inFolder(r, path, deep)).map((r) => r.relativePath);
+		expect(names('', false)).toHaveLength(5);
+		expect(names('Accounting', true)).toHaveLength(3);
+		expect(names('Accounting', false)).toEqual([]);
+		expect(names('Accounting/Tax', false)).toEqual(['skills/accounting/tax/sales-tax']);
+		expect(names('Account', true)).toEqual([]);
 	});
 });

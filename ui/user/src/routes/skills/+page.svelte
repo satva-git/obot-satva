@@ -22,9 +22,25 @@
 		setFilterUrlParams,
 		setUrlParamAndUpdateUrl
 	} from '$lib/url.js';
-	import { toSkillRows } from './skill-facets';
-	import { TriangleAlert, PencilRuler, Bot, Download } from '@lucide/svelte';
+	import {
+		buildFolderTree,
+		findFolder,
+		inFolder,
+		toSkillRows,
+		type FolderNode
+	} from './skill-facets';
+	import {
+		TriangleAlert,
+		PencilRuler,
+		Bot,
+		Download,
+		ChevronDown,
+		ChevronRight,
+		Folder,
+		Library
+	} from '@lucide/svelte';
 	import { untrack } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { twMerge } from 'tailwind-merge';
 
 	let { data } = $props();
@@ -33,7 +49,33 @@
 	let skills = $state<Skill[]>(untrack(() => data?.skills ?? []));
 	// Each skill also carries a department and group (from its folder path) so a large library can be narrowed down.
 	let skillRows = $derived(toSkillRows(skills));
-	let urlFilters = $derived(getTableUrlParamsFilters());
+	// `folder` belongs to the folder browser, not to a table column.
+	let urlFilters = $derived(
+		Object.fromEntries(
+			Object.entries(getTableUrlParamsFilters()).filter(([key]) => key !== 'folder')
+		)
+	);
+
+	// Folder browser: the skill library's folders as a tree; the selected folder lives in the URL (?folder=).
+	let folderTree = $derived(buildFolderTree(skillRows));
+	let folderPath = $derived(page.url.searchParams.get('folder') ?? '');
+	let currentFolder = $derived(findFolder(folderTree, folderPath) ?? folderTree);
+	let includeSubfolders = $state(true);
+	const openFolders = new SvelteSet<string>(ancestorsOf(untrack(() => folderPath)));
+
+	function ancestorsOf(path: string): string[] {
+		return path ? path.split('/').map((_, i, parts) => parts.slice(0, i + 1).join('/')) : [];
+	}
+
+	function selectFolder(path: string) {
+		ancestorsOf(path).forEach((p) => openFolders.add(p));
+		setUrlParamAndUpdateUrl(page.url, 'folder', path);
+	}
+
+	function toggleFolder(path: string) {
+		if (openFolders.has(path)) openFolders.delete(path);
+		else openFolders.add(path);
+	}
 
 	let copyFields = $state<ReturnType<typeof CopyField>[]>([]);
 	let installSkillDialog = $state<ReturnType<typeof ResponsiveDialog> | undefined>(undefined);
@@ -83,9 +125,13 @@
 		];
 	});
 
+	let folderRows = $derived(
+		skillRows.filter((row) => inFolder(row, currentFolder.path, includeSubfolders))
+	);
+
 	let skillsTableData = $derived(
 		query
-			? skillRows.filter(
+			? folderRows.filter(
 					(d) =>
 						d.displayName?.toLowerCase().includes(query.toLowerCase()) ||
 						d.name?.toLowerCase().includes(query.toLowerCase()) ||
@@ -93,7 +139,7 @@
 						d.department.toLowerCase().includes(query.toLowerCase()) ||
 						d.group.toLowerCase().includes(query.toLowerCase())
 				)
-			: skillRows
+			: folderRows
 	);
 
 	function updateSearchQuery(value: string) {
@@ -124,7 +170,9 @@
 						class="dark:bg-base-200 dark:border-base-400 bg-base-100 border border-transparent shadow-sm"
 						value={query}
 						onChange={updateSearchQuery}
-						placeholder={`Search ${skills.length} skills...`}
+						placeholder={currentFolder.path
+							? `Search ${currentFolder.count} skills in ${currentFolder.name}...`
+							: `Search ${skills.length} skills...`}
 					/>
 				</div>
 			</div>
@@ -135,6 +183,45 @@
 		</div>
 	</div>
 </Layout>
+
+{#snippet folderBranch(nodes: FolderNode[], depth: number)}
+	{#each nodes as node (node.path)}
+		<div
+			class={twMerge(
+				'hover:bg-base-200 dark:hover:bg-base-400 flex items-center gap-1 rounded-md pr-2 text-sm',
+				currentFolder.path === node.path && 'bg-base-200 dark:bg-base-400 font-medium'
+			)}
+			style={`padding-left: ${depth * 14}px`}
+		>
+			<button
+				class="btn btn-ghost btn-xs btn-square"
+				aria-label={openFolders.has(node.path) ? `Collapse ${node.name}` : `Expand ${node.name}`}
+				aria-expanded={openFolders.has(node.path)}
+				disabled={!node.children.length}
+				onclick={() => toggleFolder(node.path)}
+			>
+				{#if node.children.length}
+					{#if openFolders.has(node.path)}
+						<ChevronDown class="size-3" />
+					{:else}
+						<ChevronRight class="size-3" />
+					{/if}
+				{/if}
+			</button>
+			<button
+				class="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
+				onclick={() => selectFolder(node.path)}
+			>
+				<Folder class="size-4 shrink-0" />
+				<span class="truncate">{node.name}</span>
+				<span class="text-muted-content ml-auto text-xs">{node.count}</span>
+			</button>
+		</div>
+		{#if openFolders.has(node.path)}
+			{@render folderBranch(node.children, depth + 1)}
+		{/if}
+	{/each}
+{/snippet}
 
 {#snippet skillsView()}
 	<div class="flex flex-col gap-2">
@@ -147,6 +234,66 @@
 				</p>
 			</div>
 		{:else if skills.length > 0}
+			<div class="flex gap-4 p-4 pb-0">
+				<nav
+					aria-label="Skill folders"
+					class="hidden max-h-[70vh] w-64 shrink-0 overflow-y-auto md:block"
+				>
+					<button
+						class={twMerge(
+							'hover:bg-base-200 dark:hover:bg-base-400 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+							!currentFolder.path && 'bg-base-200 dark:bg-base-400 font-medium'
+						)}
+						onclick={() => selectFolder('')}
+					>
+						<Library class="size-4 shrink-0" />
+						<span>All skills</span>
+						<span class="text-muted-content ml-auto text-xs">{folderTree.count}</span>
+					</button>
+					{@render folderBranch(folderTree.children, 0)}
+				</nav>
+				<div class="flex min-w-0 flex-1 flex-col gap-3">
+					<div class="flex flex-wrap items-center gap-1 text-sm">
+						<button class="link link-hover" onclick={() => selectFolder('')}>All skills</button>
+						{#each ancestorsOf(currentFolder.path) as path (path)}
+							<ChevronRight class="text-muted-content size-3" />
+							<button class="link link-hover" onclick={() => selectFolder(path)}>
+								{path.split('/').at(-1)}
+							</button>
+						{/each}
+						{#if currentFolder.path}
+							<label class="ml-auto flex cursor-pointer items-center gap-2">
+								<input
+									type="checkbox"
+									class="checkbox checkbox-sm"
+									bind:checked={includeSubfolders}
+								/>
+								Include subfolders
+							</label>
+						{/if}
+					</div>
+					{#if !query && currentFolder.children.length}
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+							{#each currentFolder.children as child (child.path)}
+								<button
+									class="border-base-300 hover:bg-base-200 dark:hover:bg-base-400 flex items-center gap-3 rounded-md border p-3 text-left"
+									onclick={() => selectFolder(child.path)}
+								>
+									<Folder class="size-5 shrink-0" />
+									<span class="flex min-w-0 flex-col">
+										<span class="truncate text-sm font-medium">{child.name}</span>
+										<span class="text-muted-content text-xs">
+											{child.count} skills{child.children.length
+												? ` · ${child.children.length} folders`
+												: ''}
+										</span>
+									</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			</div>
 			<Table
 				data={skillsTableData}
 				fields={['displayName', 'department', 'group', 'description', 'created']}
