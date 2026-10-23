@@ -68,6 +68,8 @@
 	}
 
 	function selectFolder(path: string) {
+		// Only the selected branch stays open, so the tree stays short.
+		openFolders.clear();
 		ancestorsOf(path).forEach((p) => openFolders.add(p));
 		setUrlParamAndUpdateUrl(page.url, 'folder', path);
 	}
@@ -80,7 +82,7 @@
 	let copyFields = $state<ReturnType<typeof CopyField>[]>([]);
 	let installSkillDialog = $state<ReturnType<typeof ResponsiveDialog> | undefined>(undefined);
 	let selectedSkillToInstall = $state<Skill | undefined>(undefined);
-	let selectedTab = $state<'macos/linux' | 'windows'>('macos/linux');
+	let selectedTab = $state<'macos/linux' | 'windows'>('windows');
 
 	let clientUnzipCommands = $derived.by(() => {
 		const skillName = sanitizeFilenameSegment(
@@ -89,7 +91,8 @@
 		const command = (clientSkillsDirectory: string) => {
 			if (selectedTab === 'windows') {
 				const windowsSkillsDirectory = clientSkillsDirectory.replaceAll('/', '\\');
-				return `mkdir "%USERPROFILE%\\${windowsSkillsDirectory}\\${skillName}" 2>NUL & tar -xf "%USERPROFILE%\\Downloads\\${skillName}.zip" -C "%USERPROFILE%\\${windowsSkillsDirectory}\\${skillName}"`;
+				// PowerShell, the default Windows terminal; Expand-Archive creates the folder itself.
+				return `Expand-Archive -Force "$env:USERPROFILE\\Downloads\\${skillName}.zip" "$env:USERPROFILE\\${windowsSkillsDirectory}\\${skillName}"`;
 			}
 
 			return `unzip "$HOME/Downloads/${skillName}.zip" -d "$HOME/${clientSkillsDirectory}/${skillName}"`;
@@ -234,10 +237,11 @@
 				</p>
 			</div>
 		{:else if skills.length > 0}
-			<div class="flex gap-4 p-4 pb-0">
+			<div class="flex">
+				<!-- The tree stays in view while the skill list next to it scrolls with the page. -->
 				<nav
 					aria-label="Skill folders"
-					class="hidden max-h-[70vh] w-64 shrink-0 overflow-y-auto md:block"
+					class="border-base-300 sticky top-36 hidden max-h-[calc(100vh-10rem)] w-64 shrink-0 self-start overflow-y-auto border-r p-2 md:block"
 				>
 					<button
 						class={twMerge(
@@ -252,109 +256,105 @@
 					</button>
 					{@render folderBranch(folderTree.children, 0)}
 				</nav>
-				<div class="flex min-w-0 flex-1 flex-col gap-3">
-					<div class="flex flex-wrap items-center gap-1 text-sm">
-						<button class="link link-hover" onclick={() => selectFolder('')}>All skills</button>
-						{#each ancestorsOf(currentFolder.path) as path (path)}
-							<ChevronRight class="text-muted-content size-3" />
-							<button class="link link-hover" onclick={() => selectFolder(path)}>
-								{path.split('/').at(-1)}
-							</button>
-						{/each}
-						{#if currentFolder.path}
-							<label class="ml-auto flex cursor-pointer items-center gap-2">
-								<input
-									type="checkbox"
-									class="checkbox checkbox-sm"
-									bind:checked={includeSubfolders}
-								/>
-								Include subfolders
-							</label>
-						{/if}
-					</div>
-					{#if !query && currentFolder.children.length}
-						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-							{#each currentFolder.children as child (child.path)}
-								<button
-									class="border-base-300 hover:bg-base-200 dark:hover:bg-base-400 flex items-center gap-3 rounded-md border p-3 text-left"
-									onclick={() => selectFolder(child.path)}
-								>
-									<Folder class="size-5 shrink-0" />
-									<span class="flex min-w-0 flex-col">
-										<span class="truncate text-sm font-medium">{child.name}</span>
-										<span class="text-muted-content text-xs">
-											{child.count} skills{child.children.length
-												? ` · ${child.children.length} folders`
-												: ''}
-										</span>
-									</span>
+				<div class="flex min-w-0 flex-1 flex-col">
+					<div class="flex flex-col gap-2 p-3">
+						<div class="flex flex-wrap items-center gap-1 text-sm">
+							<button class="link link-hover" onclick={() => selectFolder('')}>All skills</button>
+							{#each ancestorsOf(currentFolder.path) as path (path)}
+								<ChevronRight class="text-muted-content size-3" />
+								<button class="link link-hover" onclick={() => selectFolder(path)}>
+									{path.split('/').at(-1)}
 								</button>
 							{/each}
+							{#if currentFolder.path && currentFolder.children.length}
+								<label class="ml-auto flex cursor-pointer items-center gap-2">
+									<input
+										type="checkbox"
+										class="checkbox checkbox-sm"
+										bind:checked={includeSubfolders}
+									/>
+									Include subfolders
+								</label>
+							{/if}
 						</div>
-					{/if}
+						{#if currentFolder.children.length}
+							<div class="flex flex-wrap gap-1.5">
+								{#each currentFolder.children as child (child.path)}
+									<button
+										class="border-base-300 hover:bg-base-200 dark:hover:bg-base-400 flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs"
+										onclick={() => selectFolder(child.path)}
+									>
+										<Folder class="size-3.5 shrink-0" />
+										{child.name}
+										<span class="text-muted-content">{child.count}</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+					<Table
+						data={skillsTableData}
+						fields={['displayName', 'department', 'group', 'description', 'created']}
+						noDataMessage="No skills found."
+						classes={{
+							root: 'rounded-none rounded-b-md shadow-none'
+						}}
+						columnMaxWidths={{ created: 240, department: 160, group: 200 }}
+						sortable={['displayName', 'department', 'group', 'created']}
+						filterable={['department', 'group']}
+						filters={urlFilters}
+						onFilter={setFilterUrlParams}
+						onClearAllFilters={() => clearUrlParams(['department', 'group'])}
+						headers={[
+							{
+								title: 'Name',
+								property: 'displayName'
+							},
+							{ title: 'Department', property: 'department' },
+							{ title: 'Group', property: 'group' }
+						]}
+						setRowClasses={(d) => {
+							if (d.validationError) {
+								return 'opacity-50 cursor-default dark:hover:bg-transparent hover:bg-transparent';
+							}
+							return '';
+						}}
+					>
+						{#snippet onRenderColumn(property, d)}
+							{#if property === 'displayName'}
+								<span class="flex items-center gap-2">
+									{d.displayName}
+									{#if d.validationError}
+										<div use:tooltip={{ text: d.validationError }}>
+											<TriangleAlert class="size-3 text-warning" />
+										</div>
+									{/if}
+								</span>
+							{:else if property === 'created'}
+								{formatTimeAgo(d.created).relativeTime}
+							{:else if property === 'description'}
+								<span class="line-clamp-2">{d.description ?? '—'}</span>
+							{:else}
+								{d[property as keyof typeof d]}
+							{/if}
+						{/snippet}
+						{#snippet actions(d)}
+							<div id={`install-skill-btn-container-${d.id}`}>
+								<button
+									class="btn btn-primary btn-sm"
+									id={`install-skill-btn-${d.id}`}
+									onclick={() => {
+										selectedSkillToInstall = d;
+										installSkillDialog?.open();
+									}}
+								>
+									Install
+								</button>
+							</div>
+						{/snippet}
+					</Table>
 				</div>
 			</div>
-			<Table
-				data={skillsTableData}
-				fields={['displayName', 'department', 'group', 'description', 'created']}
-				noDataMessage="No skills found."
-				classes={{
-					root: 'rounded-none rounded-b-md shadow-none'
-				}}
-				columnMaxWidths={{ created: 240, department: 160, group: 200 }}
-				sortable={['displayName', 'department', 'group', 'created']}
-				filterable={['department', 'group']}
-				filters={urlFilters}
-				onFilter={setFilterUrlParams}
-				onClearAllFilters={() => clearUrlParams(['department', 'group'])}
-				headers={[
-					{
-						title: 'Name',
-						property: 'displayName'
-					},
-					{ title: 'Department', property: 'department' },
-					{ title: 'Group', property: 'group' }
-				]}
-				setRowClasses={(d) => {
-					if (d.validationError) {
-						return 'opacity-50 cursor-default dark:hover:bg-transparent hover:bg-transparent';
-					}
-					return '';
-				}}
-			>
-				{#snippet onRenderColumn(property, d)}
-					{#if property === 'displayName'}
-						<span class="flex items-center gap-2">
-							{d.displayName}
-							{#if d.validationError}
-								<div use:tooltip={{ text: d.validationError }}>
-									<TriangleAlert class="size-3 text-warning" />
-								</div>
-							{/if}
-						</span>
-					{:else if property === 'created'}
-						{formatTimeAgo(d.created).relativeTime}
-					{:else if property === 'description'}
-						<span class="line-clamp-2">{d.description ?? '—'}</span>
-					{:else}
-						{d[property as keyof typeof d]}
-					{/if}
-				{/snippet}
-				{#snippet actions(d)}
-					<div id={`install-skill-btn-container-${d.id}`}>
-						<button
-							class="btn btn-primary btn-sm"
-							id={`install-skill-btn-${d.id}`}
-							onclick={() => {
-								selectedSkillToInstall = d;
-								installSkillDialog?.open();
-							}}
-						>
-							Install
-						</button>
-					</div>
-				{/snippet}
-			</Table>
 		{:else}
 			<div class="my-12 flex w-md flex-col items-center gap-4 self-center text-center">
 				<PencilRuler class="text-base-content/80 size-24" />
@@ -396,17 +396,17 @@
 			>
 				<button
 					role="tab"
+					class={twMerge('tab', selectedTab === 'windows' && 'tab-active')}
+					onclick={() => (selectedTab = 'windows')}
+				>
+					Windows (PowerShell)
+				</button>
+				<button
+					role="tab"
 					class={twMerge('tab', selectedTab === 'macos/linux' && 'tab-active')}
 					onclick={() => (selectedTab = 'macos/linux')}
 				>
 					macOS/Linux
-				</button>
-				<button
-					role="tab"
-					class={twMerge('tab', selectedTab === 'windows' && 'tab-active')}
-					onclick={() => (selectedTab = 'windows')}
-				>
-					Windows
 				</button>
 			</div>
 		</div>
