@@ -6,9 +6,11 @@
 	import Layout from '$lib/components/Layout.svelte';
 	import ResponsiveDialog from '$lib/components/ResponsiveDialog.svelte';
 	import Search from '$lib/components/Search.svelte';
+	import MarkdownEditor from '$lib/components/nanobot/MarkdownEditor.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import { sanitizeFilenameSegment, saveBlob } from '$lib/download';
-	import { UserService } from '$lib/services';
+	import Loading from '$lib/icons/Loading.svelte';
+	import { AdminService, UserService } from '$lib/services';
 	import type { Skill } from '$lib/services/nanobot/types';
 	import {
 		AiClient,
@@ -82,6 +84,26 @@
 	let copyFields = $state<ReturnType<typeof CopyField>[]>([]);
 	let installSkillDialog = $state<ReturnType<typeof ResponsiveDialog> | undefined>(undefined);
 	let selectedSkillToInstall = $state<Skill | undefined>(undefined);
+	let viewSkillDialog = $state<ReturnType<typeof ResponsiveDialog> | undefined>(undefined);
+	let viewedSkill = $state<Skill | undefined>(undefined);
+	let viewedSkillMarkdown = $state('');
+	let viewedSkillLoading = $state(false);
+
+	async function viewSkill(skill: Skill) {
+		viewedSkill = skill;
+		viewedSkillMarkdown = '';
+		viewedSkillLoading = true;
+		viewSkillDialog?.open();
+		try {
+			viewedSkillMarkdown = await AdminService.getSkillPreview(skill.id);
+		} catch (err) {
+			console.error('Failed to load skill preview', err);
+			viewedSkillMarkdown = 'Could not load this skill. Please try again.';
+		} finally {
+			viewedSkillLoading = false;
+		}
+	}
+
 	let selectedTab = $state<'macos/linux' | 'windows'>('windows');
 
 	let clientUnzipCommands = $derived.by(() => {
@@ -98,32 +120,40 @@
 			return `unzip "$HOME/Downloads/${skillName}.zip" -d "$HOME/${clientSkillsDirectory}/${skillName}"`;
 		};
 
+		// One command that downloads and installs (Obot CLI); `~/` works on Windows too.
+		const cliCommand = (clientSkillsDirectory: string) =>
+			`obot skills install ${selectedSkillToInstall?.id ?? ''} --destination ~/${clientSkillsDirectory}`;
+
 		return [
 			{
 				id: 'cursor',
 				label: 'Cursor',
 				icon: COMMON_AI_CLIENTS_MAP.get(AiClient.Cursor)?.icon,
 				iconDark: COMMON_AI_CLIENTS_MAP.get(AiClient.Cursor)?.iconDark,
-				command: command('.cursor/skills')
+				command: command('.cursor/skills'),
+				cliCommand: cliCommand('.cursor/skills')
 			},
 			{
 				id: 'claudeCode',
 				label: 'Claude Code',
 				icon: COMMON_AI_CLIENTS_MAP.get(AiClient.Claude)?.icon,
 				iconDark: COMMON_AI_CLIENTS_MAP.get(AiClient.Claude)?.iconDark,
-				command: command('.claude/skills')
+				command: command('.claude/skills'),
+				cliCommand: cliCommand('.claude/skills')
 			},
 			{
 				id: 'codex',
 				label: 'Codex',
 				icon: COMMON_AI_CLIENTS_MAP.get(AiClient.Codex)?.icon,
 				iconDark: COMMON_AI_CLIENTS_MAP.get(AiClient.Codex)?.iconDark,
-				command: command('.codex/skills')
+				command: command('.codex/skills'),
+				cliCommand: cliCommand('.codex/skills')
 			},
 			{
 				id: 'other',
 				label: 'Other',
-				command: command('.agents/skills')
+				command: command('.agents/skills'),
+				cliCommand: cliCommand('.agents/skills')
 			}
 		];
 	});
@@ -339,7 +369,8 @@
 							{/if}
 						{/snippet}
 						{#snippet actions(d)}
-							<div id={`install-skill-btn-container-${d.id}`}>
+							<div id={`install-skill-btn-container-${d.id}`} class="flex gap-2">
+								<button class="btn btn-sm" onclick={() => viewSkill(d)}>View</button>
 								<button
 									class="btn btn-primary btn-sm"
 									id={`install-skill-btn-${d.id}`}
@@ -375,8 +406,25 @@
 	title={selectedSkillToInstall?.displayName}
 >
 	<div class="w-full @container md:px-0 px-4">
+		<div class="divider md:mt-0">Quick install (one command)</div>
+		<p class="text-muted-content mb-2 text-xs">
+			Needs the Obot CLI. <a class="link" href={resolve('/install-cli')}>Get the Obot CLI</a>
+		</p>
+		<div class="flex flex-col gap-2">
+			{#each clientUnzipCommands as client (client.id)}
+				<CopyField
+					value={client.cliCommand}
+					id={`cli-command-${client.id}`}
+					classes={{ inputLabel: 'bg-base-100 dark:bg-base-300', input: 'font-mono' }}
+				>
+					{#snippet preContent()}
+						<span class="label shrink-0 w-38 mr-0 text-base-content">{client.label}</span>
+					{/snippet}
+				</CopyField>
+			{/each}
+		</div>
 		<div id="download-skill-container">
-			<div class="divider md:mt-0">1. Download {selectedSkillToInstall?.displayName}</div>
+			<div class="divider">Or by hand: 1. Download {selectedSkillToInstall?.displayName}</div>
 			<div class="md:p-0 md:pb-0 p-4">
 				<button
 					class="btn btn-primary btn-sm w-full"
@@ -446,6 +494,34 @@
 			{/each}
 		</div>
 	</div>
+</ResponsiveDialog>
+
+<ResponsiveDialog
+	bind:this={viewSkillDialog}
+	animate="slide"
+	id="view-skill-dialog"
+	title={viewedSkill?.displayName}
+	class="md:w-3xl"
+>
+	{#if viewedSkillLoading}
+		<Loading />
+	{:else}
+		<div class="nanobot view-skill-preview">
+			<MarkdownEditor value={viewedSkillMarkdown} readonly />
+		</div>
+	{/if}
+	{#if viewedSkill}
+		<button
+			class="btn btn-primary btn-sm mt-4 w-full"
+			onclick={() => {
+				selectedSkillToInstall = viewedSkill;
+				viewSkillDialog?.close();
+				installSkillDialog?.open();
+			}}
+		>
+			Install
+		</button>
+	{/if}
 </ResponsiveDialog>
 
 <svelte:head>
