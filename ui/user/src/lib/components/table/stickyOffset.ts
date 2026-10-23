@@ -21,6 +21,12 @@ export function calculateStickyTop(wrapper: HTMLElement): number {
 
 	let maxStickyBottom = 0;
 	let current: HTMLElement | null = wrapper;
+	const wrapperRect = wrapper.getBoundingClientRect();
+	// A sticky element beside the table (e.g. a folder sidebar) is not above it, so it must not push the header down.
+	const besideTable = (el: Element) => {
+		const rect = el.getBoundingClientRect();
+		return rect.right <= wrapperRect.left || rect.left >= wrapperRect.right;
+	};
 
 	while (current && current !== scrollContainer) {
 		const parent: HTMLElement | null = current.parentElement;
@@ -30,7 +36,7 @@ export function calculateStickyTop(wrapper: HTMLElement): number {
 			if (sibling === current) break;
 
 			const siblingStyle = getComputedStyle(sibling);
-			if (siblingStyle.position === 'sticky') {
+			if (siblingStyle.position === 'sticky' && !besideTable(sibling)) {
 				const top = parseFloat(siblingStyle.top) || 0;
 				if (top >= 0 && top < 200) {
 					maxStickyBottom = Math.max(maxStickyBottom, top + (sibling as HTMLElement).offsetHeight);
@@ -43,7 +49,7 @@ export function calculateStickyTop(wrapper: HTMLElement): number {
 				if (otherTableRoot && otherTableRoot !== wrapper) continue;
 
 				const descStyle = getComputedStyle(desc);
-				if (descStyle.position === 'sticky') {
+				if (descStyle.position === 'sticky' && !besideTable(el)) {
 					const top = parseFloat(descStyle.top) || 0;
 					if (top >= 0 && top < 200) {
 						maxStickyBottom = Math.max(maxStickyBottom, top + el.offsetHeight);
