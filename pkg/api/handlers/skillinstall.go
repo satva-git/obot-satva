@@ -103,7 +103,7 @@ func (h *SkillHandler) InstallScript(req api.Context) error {
 	}
 
 	zipURL := strings.TrimSuffix(req.APIBaseURL, "/") + "/skill-install/" + req.PathValue("token") + "/zip"
-	script, err := skillInstallScript(req.PathValue("os"), skillInstallName(skill), dir, zipURL)
+	script, err := skillInstallScript(req.PathValue("os"), skillInstallKind(skill), skillInstallName(skill), dir, zipURL)
 	if err != nil {
 		http.Error(req.ResponseWriter, err.Error(), http.StatusBadRequest)
 		return nil
@@ -148,60 +148,122 @@ func skillInstallName(skill *v1.Skill) string {
 	return "skill"
 }
 
-// skillInstallScript builds the install script. name must come from skillInstallName and dir from skillInstallDirs.
-func skillInstallScript(osName, name, dir, zipURL string) (string, error) {
+// skillInstallKind reads the "kind" the skills repo puts in SKILL.md metadata. Agents are copied into the
+// agents folder, guardrails also run their installer (install.mjs), anything else is a plain skill.
+func skillInstallKind(skill *v1.Skill) string {
+	switch k := skill.Spec.MetadataValues["kind"]; k {
+	case "agent", "guardrail":
+		return k
+	}
+	return "skill"
+}
+
+// skillInstallScript builds the install script. name must come from skillInstallName, dir from
+// skillInstallDirs and kind from skillInstallKind, so none of them can break out of the quotes.
+func skillInstallScript(osName, kind, name, dir, zipURL string) (string, error) {
 	if strings.ContainsAny(zipURL, "'\"`$\\ \n\r") {
 		return "", fmt.Errorf("server URL contains characters that are not allowed in an install script")
 	}
+	agents := strings.TrimSuffix(dir, "/skills") + "/agents"
+	var script string
 	switch osName {
 	case "windows":
-		target := strings.ReplaceAll(dir, "/", `\`) + `\` + name
-		return fmt.Sprintf(windowsInstallScript, target, zipURL, name), nil
+		script, dir, agents = windowsInstallScript, strings.ReplaceAll(dir, "/", `\`)+`\`+name, strings.ReplaceAll(agents, "/", `\`)
 	case "unix":
-		return fmt.Sprintf(unixInstallScript, dir+"/"+name, zipURL, name), nil
+		script, dir = unixInstallScript, dir+"/"+name
 	default:
 		return "", fmt.Errorf("unknown OS %q, use windows or unix", osName)
 	}
+	return strings.NewReplacer("{{KIND}}", kind, "{{NAME}}", name, "{{DEST}}", dir, "{{AGENTS}}", agents, "{{URL}}", zipURL).Replace(script), nil
 }
 
 // Runs inside the caller's session via `irm | iex`, so it is wrapped in a script block
 // and uses throw instead of exit (exit would close the user's PowerShell window).
-// Existing files are overwritten in place; nothing is deleted.
+// Existing files are overwritten in place; nothing in the install folder is deleted.
 const windowsInstallScript = `& {
   $ErrorActionPreference = 'Stop'
   $ProgressPreference = 'SilentlyContinue'
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-  $dest = Join-Path $HOME '%[1]s'
+  $kind = '{{KIND}}'
+  $dest = Join-Path $HOME '{{DEST}}'
   $zip = Join-Path $env:TEMP ('obot-skill-' + [guid]::NewGuid().ToString() + '.zip')
+  $tmp = $zip + '.d'
   try {
-    Invoke-WebRequest -UseBasicParsing -Uri '%[2]s' -OutFile $zip
-    New-Item -ItemType Directory -Force -Path $dest | Out-Null
-    Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
+    Invoke-WebRequest -UseBasicParsing -Uri '{{URL}}' -OutFile $zip
+    if ($kind -eq 'agent') {
+      # The zip holds SKILL.md (the page entry) plus the agent file; only the agent goes into the agents folder.
+      Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
+      $dest = Join-Path $HOME '{{AGENTS}}'
+      New-Item -ItemType Directory -Force -Path $dest | Out-Null
+      Get-ChildItem -LiteralPath $tmp -Filter *.md | Where-Object { $_.Name -ne 'SKILL.md' } | Copy-Item -Destination $dest -Force
+    } else {
+      New-Item -ItemType Directory -Force -Path $dest | Out-Null
+      Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
+    }
+    $installer = Join-Path $dest 'install.mjs'
+    if ($kind -eq 'guardrail' -and (Test-Path -LiteralPath $installer)) {
+      if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'the guardrails need Node.js 18 or newer. Install it from https://nodejs.org and run this command again' }
+      $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+      if ($admin) {
+        & node $installer
+        if ($LASTEXITCODE) { throw 'the guardrail installer failed, see the message above' }
+      } else {
+        Write-Host 'Guardrails are installed for every user of this PC, so Windows will ask for admin rights. Click Yes.'
+        $p = Start-Process node -ArgumentList ('"' + $installer + '"') -Verb RunAs -Wait -PassThru
+        if ($p.ExitCode) { throw "the guardrail installer failed (exit $($p.ExitCode)). Run PowerShell as Administrator and try again" }
+      }
+      & node $installer --verify
+      if ($LASTEXITCODE) { throw 'the guardrail check failed, see the FAIL lines above' }
+    }
   } catch {
-    throw "Install of %[3]s failed: $($_.Exception.Message)"
+    throw "Install of {{NAME}} failed: $($_.Exception.Message)"
   } finally {
     if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+    if (Test-Path -LiteralPath $tmp) { Get-ChildItem -LiteralPath $tmp | Remove-Item -Force; Remove-Item -LiteralPath $tmp -Force }
   }
-  Write-Host "Installed %[3]s to $dest. Restart your AI tool."
+  Write-Host "Installed {{NAME}} to $dest. Restart your AI tool."
 }
 `
 
+// Agent zips are flat (SKILL.md + the agent file), so the temp folder never holds subfolders.
 const unixInstallScript = `#!/bin/sh
 set -eu
-dest="$HOME/%[1]s"
-zip=$(mktemp)
-trap 'rm -f "$zip"' EXIT
-fail() { echo "Install of %[3]s failed: $1" >&2; exit 1; }
-curl -fsSL '%[2]s' -o "$zip" || fail "could not download the skill (the link may have expired)"
-mkdir -p "$dest"
-if command -v unzip >/dev/null 2>&1; then
-  unzip -oq "$zip" -d "$dest" || fail "could not unzip"
-elif command -v python3 >/dev/null 2>&1; then
-  python3 -m zipfile -e "$zip" "$dest" || fail "could not unzip"
-elif command -v bsdtar >/dev/null 2>&1; then
-  bsdtar -xf "$zip" -C "$dest" || fail "could not unzip"
+kind='{{KIND}}'
+dest="$HOME/{{DEST}}"
+tmp=$(mktemp -d)
+trap 'rm -f "$tmp"/*; rmdir "$tmp"' EXIT
+fail() { echo "Install of {{NAME}} failed: $1" >&2; exit 1; }
+unpack() {
+  mkdir -p "$1"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -oq "$tmp/skill.zip" -d "$1" || fail "could not unzip"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -m zipfile -e "$tmp/skill.zip" "$1" || fail "could not unzip"
+  elif command -v bsdtar >/dev/null 2>&1; then
+    bsdtar -xf "$tmp/skill.zip" -C "$1" || fail "could not unzip"
+  else
+    fail "install unzip or python3 and try again"
+  fi
+}
+curl -fsSL '{{URL}}' -o "$tmp/skill.zip" || fail "could not download the skill (the link may have expired)"
+if [ "$kind" = agent ]; then
+  # Only the agent file goes into the agents folder, not SKILL.md (the page entry).
+  unpack "$tmp"
+  dest="$HOME/{{AGENTS}}"
+  mkdir -p "$dest"
+  for f in "$tmp"/*.md; do [ "$(basename "$f")" = SKILL.md ] || cp -f "$f" "$dest/"; done
 else
-  fail "install unzip or python3 and try again"
+  unpack "$dest"
 fi
-echo "Installed %[3]s to $dest. Restart your AI tool."
+if [ "$kind" = guardrail ] && [ -f "$dest/install.mjs" ]; then
+  node=$(command -v node) || fail "the guardrails need Node.js 18 or newer. Install it from https://nodejs.org and run this command again"
+  if [ "$(id -u)" = 0 ]; then
+    "$node" "$dest/install.mjs" || fail "the guardrail installer failed, see the message above"
+  else
+    echo "Guardrails are installed for every user of this machine, so sudo will ask for your password."
+    sudo "$node" "$dest/install.mjs" || fail "the guardrail installer failed, see the message above"
+  fi
+  "$node" "$dest/install.mjs" --verify || fail "the guardrail check failed, see the FAIL lines above"
+fi
+echo "Installed {{NAME}} to $dest. Restart your AI tool."
 `

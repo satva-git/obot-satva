@@ -126,6 +126,14 @@
 		}
 	}
 
+	// The one command puts agents in the agents folder and runs the core guardrail installer (see skillinstall.go).
+	let installKind = $derived.by(() => {
+		const path = selectedSkillToInstall?.relativePath ?? '';
+		if (path.startsWith('skills/agents/')) return 'agent';
+		if (path.startsWith('skills/guardrails/core/')) return 'guardrail-installer';
+		return 'skill';
+	});
+
 	let clientUnzipCommands = $derived.by(() => {
 		const skillName = sanitizeFilenameSegment(
 			selectedSkillToInstall?.name ?? selectedSkillToInstall?.id ?? 'skill'
@@ -461,6 +469,18 @@
 			<Loading />
 		{:else}
 			<p class="text-muted-content mb-2 text-xs">Link works for 15 minutes.</p>
+			{#if installKind === 'agent'}
+				<p class="mb-2 text-xs">
+					This is an agent: the command puts it in your agents folder (for example
+					~/.claude/agents).
+				</p>
+			{:else if installKind === 'guardrail-installer'}
+				<p class="mb-2 text-xs">
+					Needs Node.js 18 or newer. The guardrails are installed for every user of the computer, so
+					Windows asks for admin rights (macOS/Linux asks for your password). The command checks the
+					install at the end.
+				</p>
+			{/if}
 			<div class="flex flex-col gap-2">
 				{#each clientUnzipCommands as client (client.id)}
 					<CopyField

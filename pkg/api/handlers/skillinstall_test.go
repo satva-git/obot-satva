@@ -59,23 +59,44 @@ func TestSkillInstallName(t *testing.T) {
 	assert.Equal(t, "sk1", skillInstallName(&v1.Skill{ObjectMeta: metav1.ObjectMeta{Name: "sk1"}, Spec: v1.SkillSpec{SkillManifest: types.SkillManifest{Name: "$$$"}}}))
 }
 
+func TestSkillInstallKind(t *testing.T) {
+	kind := func(k string) string {
+		return skillInstallKind(&v1.Skill{Spec: v1.SkillSpec{SkillManifest: types.SkillManifest{MetadataValues: map[string]string{"kind": k}}}})
+	}
+	assert.Equal(t, "agent", kind("agent"))
+	assert.Equal(t, "guardrail", kind("guardrail"))
+	assert.Equal(t, "skill", kind("'; rm x"))
+	assert.Equal(t, "skill", skillInstallKind(&v1.Skill{}))
+}
+
 func TestSkillInstallScript(t *testing.T) {
 	url := "https://obot.example.com/api/skill-install/abc/zip"
 
-	ps, err := skillInstallScript("windows", "pg-helper", ".cursor/skills", url)
+	ps, err := skillInstallScript("windows", "skill", "pg-helper", ".cursor/skills", url)
 	require.NoError(t, err)
 	assert.Contains(t, ps, `Join-Path $HOME '.cursor\skills\pg-helper'`)
 	assert.Contains(t, ps, "Invoke-WebRequest -UseBasicParsing -Uri '"+url+"'")
 	assert.Contains(t, ps, "Installed pg-helper to $dest. Restart your AI tool.")
 
-	sh, err := skillInstallScript("unix", "pg-helper", ".claude/skills", url)
+	sh, err := skillInstallScript("unix", "skill", "pg-helper", ".claude/skills", url)
 	require.NoError(t, err)
 	assert.Contains(t, sh, `dest="$HOME/.claude/skills/pg-helper"`)
 	assert.Contains(t, sh, "curl -fsSL '"+url+"'")
 
-	_, err = skillInstallScript("plan9", "pg-helper", ".claude/skills", url)
+	ps, err = skillInstallScript("windows", "agent", "data-analyst-agent", ".claude/skills", url)
+	require.NoError(t, err)
+	assert.Contains(t, ps, "$kind = 'agent'")
+	assert.Contains(t, ps, `Join-Path $HOME '.claudegents'`)
+
+	sh, err = skillInstallScript("unix", "guardrail", "org-guardrails", ".claude/skills", url)
+	require.NoError(t, err)
+	assert.Contains(t, sh, "kind='guardrail'")
+	assert.Contains(t, sh, `sudo "$node" "$dest/install.mjs"`)
+	assert.NotContains(t, sh, "{{")
+
+	_, err = skillInstallScript("plan9", "skill", "pg-helper", ".claude/skills", url)
 	assert.Error(t, err)
-	_, err = skillInstallScript("unix", "pg-helper", ".claude/skills", "https://x/'$(id)'")
+	_, err = skillInstallScript("unix", "skill", "pg-helper", ".claude/skills", "https://x/'$(id)'")
 	assert.Error(t, err)
 }
 
