@@ -86,7 +86,7 @@ func TestSkillInstallScript(t *testing.T) {
 	ps, err = skillInstallScript("windows", "agent", "data-analyst-agent", ".claude/skills", url)
 	require.NoError(t, err)
 	assert.Contains(t, ps, "$kind = 'agent'")
-	assert.Contains(t, ps, `Join-Path $HOME '.claudegents'`)
+	assert.Contains(t, ps, `Join-Path $HOME '.claude\agents'`)
 
 	sh, err = skillInstallScript("unix", "guardrail", "org-guardrails", ".claude/skills", url)
 	require.NoError(t, err)
